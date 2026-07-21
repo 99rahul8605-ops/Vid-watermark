@@ -17,6 +17,17 @@ import logging
 import os
 import time
 
+# --- Python 3.13+ compatibility shim -----------------------------------
+# Pyrogram calls asyncio.get_event_loop() at import time (in pyrogram/sync.py).
+# Newer Python versions raise RuntimeError there if no loop already exists
+# in the main thread instead of silently creating one. Create it ourselves
+# before importing pyrogram so the import succeeds on any Python version.
+try:
+    asyncio.get_event_loop()
+except RuntimeError:
+    asyncio.set_event_loop(asyncio.new_event_loop())
+# -------------------------------------------------------------------------
+
 from pyrogram import Client, StopTransmission, filters
 from pyrogram.types import Message
 
