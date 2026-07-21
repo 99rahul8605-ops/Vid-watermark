@@ -2,6 +2,7 @@
 Live progress bar utilities shared by download, upload and ffmpeg stages.
 """
 
+import asyncio
 import time
 
 from config import PROGRESS_EDIT_INTERVAL
@@ -101,7 +102,7 @@ class ProgressTracker:
         try:
             await self.message.edit_text(text)
         except FloodWait as e:
-            time.sleep(e.value)
+            await asyncio.sleep(e.value)
         except Exception:
             pass
 

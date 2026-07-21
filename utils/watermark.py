@@ -6,11 +6,14 @@ back to a Telegram status message.
 """
 
 import asyncio
+import logging
 import os
 import time
 
 from config import FONT_PATH
 from utils.progress import make_bar, human_time
+
+log = logging.getLogger("watermark-bot.ffmpeg")
 
 
 async def get_duration(path: str) -> float:
@@ -102,7 +105,7 @@ async def run_ffmpeg_watermark(input_path: str, output_path: str, status_message
         scale_filter, overlay_filter = build_floating_logo_filters()
         filter_complex = f"{scale_filter};{overlay_filter}"
         cmd = [
-            "ffmpeg", "-y",
+            "ffmpeg", "-y", "-nostdin",
             "-i", input_path,
             "-i", logo_path,
             "-filter_complex", filter_complex,
@@ -114,7 +117,7 @@ async def run_ffmpeg_watermark(input_path: str, output_path: str, status_message
         ]
     else:
         cmd = [
-            "ffmpeg", "-y",
+            "ffmpeg", "-y", "-nostdin",
             "-i", input_path,
             "-vf", text_filter,
             "-c:v", "libx264", "-preset", preset, "-crf", str(crf),
@@ -124,20 +127,57 @@ async def run_ffmpeg_watermark(input_path: str, output_path: str, status_message
             output_path,
         ]
 
+    # stdin=DEVNULL is critical: without it ffmpeg can inherit the parent's
+    # tty stdin and hang forever waiting for input when run interactively.
+    # stderr is captured (not DEVNULL) so we can surface real errors instead
+    # of hanging silently on failure.
     proc = await asyncio.create_subprocess_exec(
         *cmd,
+        stdin=asyncio.subprocess.DEVNULL,
         stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.DEVNULL,
+        stderr=asyncio.subprocess.PIPE,
     )
     if proc_holder is not None:
         proc_holder["proc"] = proc
+
+    # Drain stderr in the background so ffmpeg never blocks on a full pipe,
+    # and keep the last chunk around so we can show a real error on failure.
+    stderr_lines: list[str] = []
+
+    async def _drain_stderr():
+        while True:
+            line = await proc.stderr.readline()
+            if not line:
+                break
+            text = line.decode(errors="ignore").rstrip()
+            if text:
+                stderr_lines.append(text)
+                if len(stderr_lines) > 30:
+                    del stderr_lines[0]
+
+    stderr_task = asyncio.create_task(_drain_stderr())
 
     start = time.time()
     last_edit = 0.0
     out_time_ms = 0
 
+    STALL_TIMEOUT = 120  # seconds with zero output before we assume ffmpeg is stuck
+
     while True:
-        line = await proc.stdout.readline()
+        try:
+            line = await asyncio.wait_for(proc.stdout.readline(), timeout=STALL_TIMEOUT)
+        except asyncio.TimeoutError:
+            log.error("ffmpeg produced no output for %ss, killing it (stalled process)", STALL_TIMEOUT)
+            proc.kill()
+            try:
+                await status_message.edit_text(
+                    "❌ Watermark processing stalled and was stopped. "
+                    "Please try again, or try `/preset ultrafast`."
+                )
+            except Exception:
+                pass
+            break
+
         if not line:
             break
 
@@ -177,4 +217,13 @@ async def run_ffmpeg_watermark(input_path: str, output_path: str, status_message
                 break
 
     await proc.wait()
-    return proc.returncode == 0 and os.path.exists(output_path)
+    try:
+        await asyncio.wait_for(stderr_task, timeout=5)
+    except asyncio.TimeoutError:
+        stderr_task.cancel()
+
+    success = proc.returncode == 0 and os.path.exists(output_path)
+    if not success:
+        err_tail = "\n".join(stderr_lines[-8:]) if stderr_lines else "(no ffmpeg output captured)"
+        log.error("ffmpeg failed (code %s):\n%s", proc.returncode, err_tail)
+    return success
