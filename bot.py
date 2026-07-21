@@ -106,6 +106,7 @@ async def cmd_help(client, message: Message):
         "`/removelogo` — go back to text watermark\n"
         "`/preset <name>` — encode speed preset: "
         f"{', '.join(config.ALLOWED_PRESETS)}\n"
+        "`/crf <18-32>` — output quality/size (lower=bigger&better, higher=smaller)\n"
         "`/settings` — show your current configuration\n"
         "`/cancel` — cancel your current running task\n\n"
         "**How to use:** just send/forward a video file. I'll reply with "
@@ -150,6 +151,26 @@ async def cmd_removelogo(client, message: Message):
     cleanup(s["logo_path"])
     db.unset_user(message.from_user.id, "logo_path")
     await message.reply_text("✅ Logo removed. Back to text watermark.")
+
+
+@app.on_message(filters.command("crf") & filters.private)
+async def cmd_crf(client, message: Message):
+    if len(message.command) < 2 or not message.command[1].isdigit():
+        await message.reply_text(
+            "Usage: `/crf <number>` (range 18-32)\n\n"
+            "**Lower = better quality, bigger file** (18 ≈ near-lossless)\n"
+            "**Higher = smaller file, lower quality** (28-30 ≈ good for weak servers)\n"
+            "Default is 23. This matters more for file size than /preset does — "
+            "`ultrafast` in particular produces much bigger files unless you "
+            "raise the CRF to compensate."
+        )
+        return
+    crf = int(message.command[1])
+    if not (18 <= crf <= 32):
+        await message.reply_text("⚠️ Please choose a CRF value between 18 and 32.")
+        return
+    db.set_user(message.from_user.id, "crf", crf)
+    await message.reply_text(f"✅ CRF set to `{crf}`.")
 
 
 @app.on_message(filters.command("preset") & filters.private)

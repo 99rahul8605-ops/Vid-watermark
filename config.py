@@ -40,7 +40,9 @@ FONT_PATH = os.environ.get(
 PYROGRAM_WORKERS = int(os.environ.get("PYROGRAM_WORKERS", "100"))
 
 # How many watermark jobs can run at the same time (higher = more RAM/CPU used).
-MAX_CONCURRENT_TASKS = int(os.environ.get("MAX_CONCURRENT_TASKS", "3"))
+# Kept at 1 by default since even a single 1080p ffmpeg encode can use
+# 200-500MB+ RAM -- raise this only if your server has plenty of free RAM.
+MAX_CONCURRENT_TASKS = int(os.environ.get("MAX_CONCURRENT_TASKS", "1"))
 
 # Default ffmpeg encode preset (ultrafast..placebo). Faster preset = quicker
 # processing, slightly bigger file. veryfast is a good speed/quality balance.
