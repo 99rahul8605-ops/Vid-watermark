@@ -257,10 +257,15 @@ async def handle_video(client, message: Message):
                 raise StopTransmission
 
             if not ok:
-                await status.edit_text(
-                    "❌ Watermarking failed. Please make sure the file is a "
-                    "valid video and try again."
-                )
+                # run_ffmpeg_watermark already logs the real ffmpeg stderr
+                # to the console/log file for debugging.
+                try:
+                    await status.edit_text(
+                        "❌ Watermarking failed. Check the bot's terminal/log "
+                        "output for the ffmpeg error details, then try again."
+                    )
+                except Exception:
+                    pass
                 return
 
             # ---- 3. Upload with live progress -----------------------------
